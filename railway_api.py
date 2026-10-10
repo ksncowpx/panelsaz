@@ -4,9 +4,6 @@ import random
 import string
 
 RAILWAY_GRAPHQL_URL = "https://backboard.railway.app/graphql/v2"
-GITHUB_REPO = "hdzirxluci-hub/pablo-panel"
-
-# کد رسمی سرور هلند (آمستردام) در ریلوی
 NETHERLANDS_REGION = "europe-west4"
 
 async def execute_graphql(token: str, query: str, variables: dict = None):
@@ -25,7 +22,6 @@ async def execute_graphql(token: str, query: str, variables: dict = None):
                 return None, data["errors"][0]["message"]
             return data.get("data"), None
 
-# بررسی اعتبار توکن
 async def validate_railway_token(token: str):
     query = """
     query {
@@ -43,9 +39,7 @@ async def validate_railway_token(token: str):
         return False, "توکن نامعتبر است یا منقضی شده است."
     return True, data["me"]["email"]
 
-# ساخت، تنظیم ریجن هلند، دیپلوی و ساخت دامین
-async def deploy_pablo(token: str):
-    # ۱. دریافت اطلاعات کاربر
+async def deploy_custom_panel(token: str, repo: str, default_user: str, default_pass: str):
     user_info_query = """
     query {
         me {
@@ -58,14 +52,13 @@ async def deploy_pablo(token: str):
     """
     user_data, err = await execute_graphql(token, user_info_query)
     if err or not user_data or not user_data.get("me"):
-        return None, "خطا در دریافت اطلاعات کاربر از ریلوی."
+        return None, "خطا در دریافت اطلاعات حساب ریلوی."
 
     workspaces = user_data["me"].get("workspaces", [])
     workspace_id = workspaces[0]["id"] if workspaces else None
 
-    # ۲. ساخت پروژه
     rand_str = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
-    project_name = f"pablo-{rand_str}"
+    project_name = f"panel-{rand_str}"
 
     project_input = {"name": project_name}
     if workspace_id:
@@ -86,13 +79,12 @@ async def deploy_pablo(token: str):
     }
     """
     data, err = await execute_graphql(token, create_project_query, {"input": project_input})
-    if err: 
-        return None, f"خطا در ساخت پروژه: {err}"
+    if err: return None, f"خطا در ساخت پروژه: {err}"
     
     project_id = data["projectCreate"]["id"]
     environment_id = data["projectCreate"]["environments"]["edges"][0]["node"]["id"]
 
-    # ۳. اتصال ریپازیتوری پابلو پنل
+    # اتصال به ریپازیتوری
     create_service_query = """
     mutation serviceCreate($input: ServiceCreateInput!) {
         serviceCreate(input: $input) {
@@ -103,35 +95,27 @@ async def deploy_pablo(token: str):
     service_data, err = await execute_graphql(token, create_service_query, {
         "input": {
             "projectId": project_id,
-            "source": {"repo": GITHUB_REPO}
+            "source": {"repo": repo}
         }
     })
-    if err: 
-        return None, f"خطا در ایجاد سرویس: {err}"
-    
+    if err: return None, f"خطا در ایجاد سرویس: {err}"
     service_id = service_data["serviceCreate"]["id"]
 
-    # ۴. تنظیم خودکار لوکیشن سرور روی هلند (Netherlands)
+    # ست کردن لوکیشن هلند
     set_region_query = """
     mutation serviceInstanceUpdate($serviceId: String!, $environmentId: String!, $input: ServiceInstanceUpdateInput!) {
-        serviceInstanceUpdate(
-            serviceId: $serviceId,
-            environmentId: $environmentId,
-            input: $input
-        )
+        serviceInstanceUpdate(serviceId: $serviceId, environmentId: $environmentId, input: $input)
     }
     """
     await execute_graphql(token, set_region_query, {
         "serviceId": service_id,
         "environmentId": environment_id,
-        "input": {
-            "region": NETHERLANDS_REGION
-        }
+        "input": {"region": NETHERLANDS_REGION}
     })
 
     await asyncio.sleep(2)
 
-    # ۵. استارت و بیلد سرور (Deploy)
+    # استارت سرویس
     deploy_trigger_query = """
     mutation serviceInstanceDeploy($serviceId: String!, $environmentId: String!) {
         serviceInstanceDeploy(serviceId: $serviceId, environmentId: $environmentId)
@@ -142,7 +126,7 @@ async def deploy_pablo(token: str):
         "environmentId": environment_id
     })
 
-    # ۶. ساخت دامین اختصاصی
+    # ساخت دامین
     create_domain_query = """
     mutation serviceDomainCreate($input: ServiceDomainCreateInput!) {
         serviceDomainCreate(input: $input) {
@@ -157,12 +141,11 @@ async def deploy_pablo(token: str):
         }
     })
     
-    domain_url = f"https://{domain_data['serviceDomainCreate']['domain']}" if (domain_data and "serviceDomainCreate" in domain_data) else "در حال فعال‌سازی در داشبورد..."
+    domain_url = f"https://{domain_data['serviceDomainCreate']['domain']}" if (domain_data and "serviceDomainCreate" in domain_data) else "دامنه به زودی در داشبورد آماده می‌شود"
     
     return {
         "project_name": project_name,
         "domain": domain_url,
-        "user": "admin",
-        "pass": "admin",
-        "region": "🇳🇱 هلند (Amsterdam)"
+        "user": default_user,
+        "pass": default_pass
     }, None
