@@ -6,6 +6,9 @@ import string
 RAILWAY_GRAPHQL_URL = "https://backboard.railway.app/graphql/v2"
 GITHUB_REPO = "hdzirxluci-hub/pablo-panel"
 
+# کد رسمی سرور هلند (آمستردام) در ریلوی
+NETHERLANDS_REGION = "europe-west4"
+
 async def execute_graphql(token: str, query: str, variables: dict = None):
     headers = {
         "Authorization": f"Bearer {token}",
@@ -40,9 +43,9 @@ async def validate_railway_token(token: str):
         return False, "توکن نامعتبر است یا منقضی شده است."
     return True, data["me"]["email"]
 
-# ساخت، اتصال، استارت و ساخت دامین
+# ساخت، تنظیم ریجن هلند، دیپلوی و ساخت دامین
 async def deploy_pablo(token: str):
-    # ۱. دریافت اطلاعات اکانت و ورک‌اسپیس
+    # ۱. دریافت اطلاعات کاربر
     user_info_query = """
     query {
         me {
@@ -89,7 +92,7 @@ async def deploy_pablo(token: str):
     project_id = data["projectCreate"]["id"]
     environment_id = data["projectCreate"]["environments"]["edges"][0]["node"]["id"]
 
-    # ۳. اتصال ریپازیتوری پابلو پنل به سرویس
+    # ۳. اتصال ریپازیتوری پابلو پنل
     create_service_query = """
     mutation serviceCreate($input: ServiceCreateInput!) {
         serviceCreate(input: $input) {
@@ -108,9 +111,27 @@ async def deploy_pablo(token: str):
     
     service_id = service_data["serviceCreate"]["id"]
 
+    # ۴. تنظیم خودکار لوکیشن سرور روی هلند (Netherlands)
+    set_region_query = """
+    mutation serviceInstanceUpdate($serviceId: String!, $environmentId: String!, $input: ServiceInstanceUpdateInput!) {
+        serviceInstanceUpdate(
+            serviceId: $serviceId,
+            environmentId: $environmentId,
+            input: $input
+        )
+    }
+    """
+    await execute_graphql(token, set_region_query, {
+        "serviceId": service_id,
+        "environmentId": environment_id,
+        "input": {
+            "region": NETHERLANDS_REGION
+        }
+    })
+
     await asyncio.sleep(2)
 
-    # ۴. ارسال دستور استارت و روشن کردن سرویس (Deploy Trigger)
+    # ۵. استارت و بیلد سرور (Deploy)
     deploy_trigger_query = """
     mutation serviceInstanceDeploy($serviceId: String!, $environmentId: String!) {
         serviceInstanceDeploy(serviceId: $serviceId, environmentId: $environmentId)
@@ -121,7 +142,7 @@ async def deploy_pablo(token: str):
         "environmentId": environment_id
     })
 
-    # ۵. ساخت دامنه اختصاصی (Generate Domain)
+    # ۶. ساخت دامین اختصاصی
     create_domain_query = """
     mutation serviceDomainCreate($input: ServiceDomainCreateInput!) {
         serviceDomainCreate(input: $input) {
@@ -142,5 +163,6 @@ async def deploy_pablo(token: str):
         "project_name": project_name,
         "domain": domain_url,
         "user": "admin",
-        "pass": "admin"
+        "pass": "admin",
+        "region": "🇳🇱 هلند (Amsterdam)"
     }, None
