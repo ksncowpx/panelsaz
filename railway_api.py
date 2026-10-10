@@ -22,7 +22,7 @@ async def execute_graphql(token: str, query: str, variables: dict = None):
                 return None, data["errors"][0]["message"]
             return data.get("data"), None
 
-# بررسی اعتبار توکن و گرفتن آیدی ورک‌اسپیس
+# بررسی اعتبار توکن
 async def validate_railway_token(token: str):
     query = """
     query {
@@ -31,7 +31,6 @@ async def validate_railway_token(token: str):
             email
             workspaces {
                 id
-                name
             }
         }
     }
@@ -41,9 +40,9 @@ async def validate_railway_token(token: str):
         return False, "توکن نامعتبر است یا منقضی شده است."
     return True, data["me"]["email"]
 
-# ساخت پروژه و دیپلوی خودکار پابلو پنل
+# ساخت، اتصال، استارت و ساخت دامین
 async def deploy_pablo(token: str):
-    # ۱. دریافت اطلاعات اکانت و شناسه Workspace
+    # ۱. دریافت اطلاعات اکانت و ورک‌اسپیس
     user_info_query = """
     query {
         me {
@@ -61,7 +60,7 @@ async def deploy_pablo(token: str):
     workspaces = user_data["me"].get("workspaces", [])
     workspace_id = workspaces[0]["id"] if workspaces else None
 
-    # ۲. ساخت پروژه جدید با ورک‌اسپیس
+    # ۲. ساخت پروژه
     rand_str = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
     project_name = f"pablo-{rand_str}"
 
@@ -90,7 +89,7 @@ async def deploy_pablo(token: str):
     project_id = data["projectCreate"]["id"]
     environment_id = data["projectCreate"]["environments"]["edges"][0]["node"]["id"]
 
-    # ۳. اتصال و دیپلوی سورس‌کد گیت‌هاب پابلو پنل
+    # ۳. اتصال ریپازیتوری پابلو پنل به سرویس
     create_service_query = """
     mutation serviceCreate($input: ServiceCreateInput!) {
         serviceCreate(input: $input) {
@@ -109,10 +108,20 @@ async def deploy_pablo(token: str):
     
     service_id = service_data["serviceCreate"]["id"]
 
-    # چند ثانیه صبر برای آماده‌سازی اولیه سرور
-    await asyncio.sleep(4)
+    await asyncio.sleep(2)
 
-    # ۴. ساخت خودکار دامنه اختصاصی (Generate Domain)
+    # ۴. ارسال دستور استارت و روشن کردن سرویس (Deploy Trigger)
+    deploy_trigger_query = """
+    mutation serviceInstanceDeploy($serviceId: String!, $environmentId: String!) {
+        serviceInstanceDeploy(serviceId: $serviceId, environmentId: $environmentId)
+    }
+    """
+    await execute_graphql(token, deploy_trigger_query, {
+        "serviceId": service_id,
+        "environmentId": environment_id
+    })
+
+    # ۵. ساخت دامنه اختصاصی (Generate Domain)
     create_domain_query = """
     mutation serviceDomainCreate($input: ServiceDomainCreateInput!) {
         serviceDomainCreate(input: $input) {
@@ -127,7 +136,7 @@ async def deploy_pablo(token: str):
         }
     })
     
-    domain_url = f"https://{domain_data['serviceDomainCreate']['domain']}" if (domain_data and "serviceDomainCreate" in domain_data) else "دامنه به زودی در داشبورد ریلوی فعال می‌شود"
+    domain_url = f"https://{domain_data['serviceDomainCreate']['domain']}" if (domain_data and "serviceDomainCreate" in domain_data) else "در حال فعال‌سازی در داشبورد..."
     
     return {
         "project_name": project_name,
